@@ -1,0 +1,15 @@
+apiVersion: app.appvia.io/v2beta1
+kind: Application
+metadata:
+  name: example-app
+spec:
+  cloud: azure
+  components:
+  - container:
+      expose: true
+      image: ghcr.io/digital-garage-icl/wf-app:refs-heads-main
+      port: 8080
+      tls: true
+    name: ui
+    type: Container
+  name: example-app

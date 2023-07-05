@@ -1,0 +1,195 @@
+name: deployment
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      repository-branch:
+        description: The branch to checkout
+        default: main
+        required: true
+      app-name:
+        description: The name of the application that will be created in Wayfinder
+        default: scientia
+        required: true
+      app-env-filename:
+        description: The name of the file to be used to create the application environment in Wayfinder
+        default: appenv.yaml
+        required: true
+      app-environment-name:
+        description: The name of the application environment that will be created in Wayfinder
+        default: dev
+        required: true
+      app-component-to-deploy:
+        description: The name of the application component that need to be deploy with Wayfinder
+        default: materials, materials-db
+        required: true
+      k8-directory:
+        description: Kustomization directory
+        default: k8
+        required: true
+      
+env:
+  WAYFINDER_TOKEN: ${{ secrets.WAYFINDER_TOKEN }}
+  WAYFINDER_SERVER: ${{ vars.WAYFINDER_SERVER }}
+  WAYFINDER_WORKSPACE: ${{ vars.WAYFINDER_WORKSPACE || 'to1' }}
+  APPLICATION_NAME: ${{ inputs.app-name || 'example-app' }}
+  APP_ENVIRONMENT_NAME: ${{ inputs.app-environment-name || 'dev' }}
+  APPLICATION_DIRECTORY: ${{ inputs.app-directory || 'infra' }}
+  APPLICATION_FILENAME: ${{ inputs.app-filename || 'application.yaml' }}
+  APP_ENVIRONMENT_FILENAME: ${{ inputs.app-env-filename || 'appenv.yaml' }}
+  KUSTOMIZATION_DIRECTORY: ${{ inputs.k8-directory || 'infra/kustomization' }}
+  # APP_COMPONENT_TO_DEPLOY: ${{ inputs.app-component-to-deploy || 'ui' }}
+
+jobs:
+  build_docker:
+    # needs: unit_test
+    runs-on: ubuntu-latest
+    # if: (github.ref == 'refs/heads/master')
+    timeout-minutes: 60
+    outputs:
+      digest: ${{ steps.docker-digest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v3.5.0
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+          
+      - name: Build tags
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.ref }},enable={{is_default_branch}}
+
+      - name: Build and push the Docker image
+        uses: docker/build-push-action@v4
+        id: docker-digest
+        with:
+          push: true
+          cache-from: |
+            ghcr.io/${{ github.repository }}:latest
+          file: source/Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+
+
+  #  apply-configured-with-ui:
+  #   runs-on: ubuntu-latest
+  #   container:        
+  #     image: quay.io/appvia-wayfinder/wftoolbox:v2.1.2
+  #     env:
+  #       WAYFINDER_TOKEN: ${{ env.WAYFINDER_TOKEN }}
+  #       WAYFINDER_SERVER: ${{ env.WAYFINDER_SERVER }}
+  #       WAYFINDER_WORKSPACE: ${{ env.WAYFINDER_WORKSPACE }}
+  #       APPLICATION_NAME: ${{ env.APPLICATION_NAME }}
+  #       APP_ENVIRONMENT_NAME: ${{ env.APP_ENVIRONMENT_NAME }}
+  #       DEPLOY_TPYE: ${{ env.DEPLOY_TPYE }}
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v3
+  #       with:
+  #         ref: ${{ inputs.repository-branch || 'main' }}   
+          
+  #     - name: Create Application Environment
+
+  apply-configured-with-yaml:
+    runs-on: ubuntu-latest
+    needs:
+      - build_docker
+    container:
+      env:
+        WAYFINDER_TOKEN:  ${{ env.WAYFINDER_TOKEN }}
+        WAYFINDER_SERVER:  ${{ env.WAYFINDER_SERVER }}
+        WAYFINDER_WORKSPACE:  ${{ env.WAYFINDER_WORKSPACE }}
+        APPLICATION_NAME: ${{ env.APPLICATION_NAME }}
+        APP_ENVIRONMENT_NAME:  ${{ env.APP_ENVIRONMENT_NAME }}
+        APPLICATION_DIRECTORY:  ${{ env.APPLICATION_DIRECTORY }}
+        APPLICATION_FILENAME:  ${{ env.APPLICATION_FILENAME }}
+        APP_ENVIRONMENT_FILENAME:  ${{ env.APP_ENVIRONMENT_FILENAME }}
+        KUSTOMIZATION_DIRECTORY:  ${{ env.KUSTOMIZATION_DIRECTORY }}
+
+      image: quay.io/appvia-wayfinder/wftoolbox:v2.1.2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.repository-branch || 'main' }}   
+          
+      - name: Create Application
+        run: wf apply -f "${APPLICATION_DIRECTORY}/${APPLICATION_FILENAME}"
+
+      - name: Create Application Environment
+        run: wf apply -f "${APPLICATION_DIRECTORY}/${APP_ENVIRONMENT_FILENAME}" --wait-for-ready ${{ inputs.app-env-wait-time || '1m' }}
+
+      - name: deploy Application
+        run: wf deploy app ${APPLICATION_NAME} ${APP_ENVIRONMENT_NAME} --image-tag latest:${{needs.build_docker.outputs.digest}}
+
+  #  apply-multi-container:
+  #   if : env.DEPLOY_TPYE == 'multi-container'
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     env:
+  #       WAYFINDER_TOKEN: ${{ secrets.WAYFINDER_TOKEN }}
+  #       WAYFINDER_SERVER: ${{ vars.WAYFINDER_SERVER }}
+  #       WAYFINDER_WORKSPACE: ${{ vars.WAYFINDER_WORKSPACE || 'to1' }}
+  #       APPLICATION_NAME: ${{ inputs.app-name || 'exampleapp' }}
+  #       APP_ENVIRONMENT_NAME: ${{ inputs.app-environment-name || 'dev' }}
+  #       APPLICATION_DIRECTORY: ${{ inputs.app-directory || 'infra' }}
+  #       APPLICATION_FILENAME: ${{ inputs.app-filename || 'application.yaml' }}
+  #       APP_ENVIRONMENT_FILENAME: ${{ inputs.app-env-filename || 'appenv.yaml' }}
+  #       KUSTOMIZATION_DIRECTORY: ${{ inputs.k8-directory || 'infra/kustomization' }}
+  #       APP_COMPONENT_TO_DEPLOY: ${{ inputs.app-component-to-deploy || 'ui' }}
+  #     image: quay.io/appvia-wayfinder/wftoolbox:v2.1.2
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v3
+  #       with:
+  #         ref: ${{ inputs.repository-branch || 'main' }}   
+          
+  #     # - name: Create Application
+  #     #   run: wf apply -f "${APPLICATION_DIRECTORY}/${APPLICATION_FILENAME}"
+
+  #     - name: Create Application Environment
+  #       run: wf apply -f "${APPLICATION_DIRECTORY}/${APP_ENVIRONMENT_FILENAME}" --wait-for-ready ${{ inputs.app-env-wait-time || '1m' }}
+
+  #     - name: Create Application Environment
+  #       run: wf deploy app ${APPLICATION_NAME} ${APP_ENVIRONMENT_NAME}
+
+      # - name: deploy with Kustomization
+      #   run: |
+      #     #access env  
+      #     # wf deploy app exampleapp dev --eject --path infra/kustomization 
+      #     wf access env ${APPLICATION_NAME} ${APP_ENVIRONMENT_NAME}
+
+      #     # if $KUSTOMIZATION_DIRECTORY is not emtpy, then use it
+      #     if [ -n "$KUSTOMIZATION_DIRECTORY" ]; then
+      #       kubectl apply -k $KUSTOMIZATION_DIRECTORY/${APP_ENVIRONMENT_NAME}
+      #     else
+      #       echo "No Kustomization"
+      #     fi
+
+
+  #     - name: deploy with Wayfinder
+  #       run: |
+  #         # Check if APP_COMPONENT_TO_DEPLOY is empty
+  #         if [ -z "$APP_COMPONENT_TO_DEPLOY" ]; then
+  #           echo "APP_COMPONENT_TO_DEPLOY is empty. No components to deploy."
+  #         else
+  #           # Split the string into an array
+  #           IFS=', ' componentList=$APP_COMPONENT_TO_DEPLOY
+
+  #           # Loop through the array
+  #           for component in $componentList
+  #           do
+  #             echo "wf deploy component $APPLICATION_NAME $APP_ENVIRONMENT_NAME --component $component"
+  #             wf deploy component "$APPLICATION_NAME" "$APP_ENVIRONMENT_NAME" --component "$component"
+  #           done
+  #           fi

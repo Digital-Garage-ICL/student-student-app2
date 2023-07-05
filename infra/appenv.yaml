@@ -1,0 +1,16 @@
+apiVersion: app.appvia.io/v2beta1
+kind: AppEnv
+metadata:
+  name: example-app-dev
+spec:
+  name: dev
+  stage: nonprod
+  application: example-app
+  cloud: azure
+  clusterRef:
+    group: compute.appvia.io
+    kind: Cluster
+    name: aks-stdnt1
+    # the namespace should be "ws-<cluster_workspace>" where <cluster_workspace> is the name of the workspace the cluster is in
+    namespace: ws-to1
+    version: v2beta1
