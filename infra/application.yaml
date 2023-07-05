@@ -7,7 +7,7 @@ spec:
   components:
   - container:
       expose: true
-      image: ghcr.io/digital-garage-icl/wf-app:refs-heads-main
+      image: ghcr.io/digital-garage-icl/student-student-app2
       port: 8080
       tls: true
     name: ui
